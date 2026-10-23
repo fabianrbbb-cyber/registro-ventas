@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Registro de ventas</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
   body { font-family: Arial, sans-serif; margin: 20px; background: #f4f6f8; color: #222; }
   h1 { margin-top: 0; }
@@ -17,49 +18,129 @@
   th, td { padding: 8px; border-bottom: 1px solid #eee; text-align: left; }
   .der { text-align: right; }
   .total { font-size: 1.3em; font-weight: bold; }
+  .oculto { display: none; }
+  .msg { color: #b91c1c; }
 </style>
 </head>
 <body>
 <h1>Registro de ventas</h1>
 
-<div class="card">
-  <form id="form">
-    <input id="fecha" type="date" required>
-    <input id="codigo" placeholder="Código" required>
-    <input id="nombre" placeholder="Nombre del producto" required>
-    <input id="monto" type="number" step="0.01" min="0" placeholder="Monto (Bs)" required>
-    <button type="submit">Agregar venta</button>
+<!-- Pantalla de acceso -->
+<div id="pantalla-acceso" class="card">
+  <h3 id="titulo-acceso">Iniciar sesión</h3>
+  <form id="form-acceso">
+    <input id="correo" type="email" placeholder="Correo" required>
+    <input id="clave" type="password" placeholder="Contraseña (mínimo 6)" minlength="6" required>
+    <button type="submit" id="btn-acceso">Entrar</button>
   </form>
+  <p><button class="sec" id="cambiar-modo" type="button">¿No tienes cuenta? Regístrate</button></p>
+  <p class="msg" id="error-acceso"></p>
 </div>
 
-<div class="card">
-  <div class="barra">
-    <input id="buscar" placeholder="Buscar por código o nombre">
-    <button class="sec" id="exportar">Exportar CSV</button>
-    <label>Importar CSV: <input type="file" id="importar" accept=".csv"></label>
+<!-- Pantalla de la app -->
+<div id="app" class="oculto">
+  <div class="card">
+    <div class="barra">
+      <span id="usuario"></span>
+      <button class="sec" id="salir" type="button">Cerrar sesión</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <form id="form">
+      <input id="fecha" type="date" required>
+      <input id="codigo" placeholder="Código" required>
+      <input id="nombre" placeholder="Nombre del producto" required>
+      <input id="monto" type="number" step="0.01" min="0" placeholder="Monto (Bs)" required>
+      <button type="submit">Agregar venta</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <div class="barra">
+      <input id="buscar" placeholder="Buscar por código o nombre">
+      <button class="sec" id="exportar" type="button">Exportar CSV</button>
+      <label>Importar CSV: <input type="file" id="importar" accept=".csv"></label>
+    </div>
+  </div>
+
+  <div class="card">
+    <p class="total">Total mostrado: <span id="total">0.00</span> Bs</p>
+    <table>
+      <thead><tr><th>Fecha</th><th>Código</th><th>Producto</th><th class="der">Monto (Bs)</th><th></th></tr></thead>
+      <tbody id="lista"></tbody>
+    </table>
   </div>
 </div>
 
-<div class="card">
-  <p class="total">Total mostrado: <span id="total">0.00</span> Bs</p>
-  <table>
-    <thead><tr><th>Fecha</th><th>Código</th><th>Producto</th><th class="der">Monto (Bs)</th><th></th></tr></thead>
-    <tbody id="lista"></tbody>
-  </table>
-</div>
-
 <script>
-const KEY = "registro_ventas_v1";
-let ventas = JSON.parse(localStorage.getItem(KEY) || "[]");
+// PEGA AQUÍ TUS DATOS DE SUPABASE
+const SUPABASE_URL = "https://zlmmbnjzpzxgrzxbwsvq.supabase.co";
+const SUPABASE_KEY = "sb_publishable_ImuSFvFOHx2p9rOiEKBglQ_58TyttL5";
+
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+let ventas = [];
+let modoRegistro = false;
 
 const $ = id => document.getElementById(id);
 
-function guardar() {
-  localStorage.setItem(KEY, JSON.stringify(ventas));
-}
-
 function esc(texto) {
   return String(texto).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+// ----- Acceso -----
+$("cambiar-modo").addEventListener("click", () => {
+  modoRegistro = !modoRegistro;
+  $("titulo-acceso").textContent = modoRegistro ? "Crear cuenta" : "Iniciar sesión";
+  $("btn-acceso").textContent = modoRegistro ? "Registrarme" : "Entrar";
+  $("cambiar-modo").textContent = modoRegistro ? "¿Ya tienes cuenta? Inicia sesión" : "¿No tienes cuenta? Regístrate";
+  $("error-acceso").textContent = "";
+});
+
+$("form-acceso").addEventListener("submit", async e => {
+  e.preventDefault();
+  const correo = $("correo").value.trim();
+  const clave = $("clave").value;
+  $("error-acceso").textContent = "";
+
+  const resultado = modoRegistro
+    ? await sb.auth.signUp({ email: correo, password: clave })
+    : await sb.auth.signInWithPassword({ email: correo, password: clave });
+
+  if (resultado.error) {
+    $("error-acceso").textContent = "Error: " + resultado.error.message;
+    return;
+  }
+  if (modoRegistro && !resultado.data.session) {
+    $("error-acceso").textContent = "Cuenta creada. Ahora inicia sesión.";
+    return;
+  }
+  $("clave").value = "";
+  await mostrarApp();
+});
+
+$("salir").addEventListener("click", async () => {
+  await sb.auth.signOut();
+  ventas = [];
+  $("app").classList.add("oculto");
+  $("pantalla-acceso").classList.remove("oculto");
+});
+
+async function mostrarApp() {
+  const { data } = await sb.auth.getUser();
+  if (!data.user) return;
+  $("usuario").textContent = "Sesión: " + data.user.email;
+  $("pantalla-acceso").classList.add("oculto");
+  $("app").classList.remove("oculto");
+  await cargarVentas();
+}
+
+// ----- Datos -----
+async function cargarVentas() {
+  const { data, error } = await sb.from("ventas").select("*").order("fecha", { ascending: true }).order("id", { ascending: true });
+  if (error) { alert("Error al cargar: " + error.message); return; }
+  ventas = data;
+  render();
 }
 
 function render() {
@@ -68,47 +149,47 @@ function render() {
   lista.innerHTML = "";
   let total = 0;
 
-  ventas.forEach((v, i) => {
-    if (q && !(v.codigo + " " + v.nombre).toLowerCase().includes(q)) return;
+  ventas.forEach(v => {
+    if (q && !(v.codigo + " " + v.producto).toLowerCase().includes(q)) return;
     total += Number(v.monto);
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td>${esc(v.fecha)}</td>
       <td>${esc(v.codigo)}</td>
-      <td>${esc(v.nombre)}</td>
+      <td>${esc(v.producto)}</td>
       <td class="der">${Number(v.monto).toFixed(2)}</td>
-      <td><button class="del" data-i="${i}">Borrar</button></td>`;
+      <td><button class="del" data-id="${v.id}">Borrar</button></td>`;
     lista.appendChild(tr);
   });
-
   $("total").textContent = total.toFixed(2);
 }
 
-$("form").addEventListener("submit", e => {
+$("form").addEventListener("submit", async e => {
   e.preventDefault();
-  ventas.push({
+  const { error } = await sb.from("ventas").insert({
     fecha: $("fecha").value,
     codigo: $("codigo").value.trim(),
-    nombre: $("nombre").value.trim(),
+    producto: $("nombre").value.trim(),
     monto: Number($("monto").value)
   });
-  guardar();
+  if (error) { alert("Error al guardar: " + error.message); return; }
   $("codigo").value = "";
   $("nombre").value = "";
   $("monto").value = "";
-  render();
+  await cargarVentas();
 });
 
-$("lista").addEventListener("click", e => {
+$("lista").addEventListener("click", async e => {
   if (!e.target.classList.contains("del")) return;
   if (!confirm("¿Borrar esta venta?")) return;
-  ventas.splice(Number(e.target.dataset.i), 1);
-  guardar();
-  render();
+  const { error } = await sb.from("ventas").delete().eq("id", e.target.dataset.id);
+  if (error) { alert("Error al borrar: " + error.message); return; }
+  await cargarVentas();
 });
 
 $("buscar").addEventListener("input", render);
 
+// ----- CSV -----
 function csvCelda(valor) {
   return '"' + String(valor).replace(/"/g, '""') + '"';
 }
@@ -116,7 +197,7 @@ function csvCelda(valor) {
 $("exportar").addEventListener("click", () => {
   const filas = ["fecha,codigo,producto,monto"];
   ventas.forEach(v => {
-    filas.push([csvCelda(v.fecha), csvCelda(v.codigo), csvCelda(v.nombre), v.monto].join(","));
+    filas.push([csvCelda(v.fecha), csvCelda(v.codigo), csvCelda(v.producto), v.monto].join(","));
   });
   const blob = new Blob(["\uFEFF" + filas.join("\n")], { type: "text/csv;charset=utf-8" });
   const a = document.createElement("a");
@@ -147,21 +228,24 @@ $("importar").addEventListener("change", async e => {
   if (!archivo) return;
   const texto = await archivo.text();
   const lineas = texto.replace(/^\uFEFF/, "").split(/\r?\n/).filter(l => l.trim());
-  let agregadas = 0;
+  const filas = [];
   lineas.slice(1).forEach(l => {
-    const [fecha, codigo, nombre, monto] = parseLinea(l);
-    if (fecha && codigo && nombre && !isNaN(Number(monto))) {
-      ventas.push({ fecha, codigo, nombre, monto: Number(monto) });
-      agregadas++;
+    const [fecha, codigo, producto, monto] = parseLinea(l);
+    if (fecha && codigo && producto && !isNaN(Number(monto))) {
+      filas.push({ fecha, codigo, producto, monto: Number(monto) });
     }
   });
-  guardar();
-  render();
-  alert(agregadas + " ventas importadas.");
+  if (filas.length) {
+    const { error } = await sb.from("ventas").insert(filas);
+    if (error) { alert("Error al importar: " + error.message); return; }
+  }
+  await cargarVentas();
+  alert(filas.length + " ventas importadas.");
   e.target.value = "";
 });
 
-render();
+// Al abrir la página, si ya hay sesión, entra directo
+mostrarApp();
 </script>
 </body>
 </html>
