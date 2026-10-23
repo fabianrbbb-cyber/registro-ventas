@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Registro de ventas</title>
+<style>
+  body { font-family: Arial, sans-serif; margin: 20px; background: #f4f6f8; color: #222; }
+  h1 { margin-top: 0; }
+  .card { background: #fff; padding: 16px; border-radius: 8px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+  form, .barra { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  input { padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
+  button { padding: 8px 12px; border: 0; border-radius: 4px; background: #2563eb; color: #fff; cursor: pointer; }
+  button.sec { background: #6b7280; }
+  button.del { background: #dc2626; }
+  table { width: 100%; border-collapse: collapse; background: #fff; }
+  th, td { padding: 8px; border-bottom: 1px solid #eee; text-align: left; }
+  .der { text-align: right; }
+  .total { font-size: 1.3em; font-weight: bold; }
+</style>
+</head>
+<body>
+<h1>Registro de ventas</h1>
+
+<div class="card">
+  <form id="form">
+    <input id="fecha" type="date" required>
+    <input id="codigo" placeholder="Código" required>
+    <input id="nombre" placeholder="Nombre del producto" required>
+    <input id="monto" type="number" step="0.01" min="0" placeholder="Monto (Bs)" required>
+    <button type="submit">Agregar venta</button>
+  </form>
+</div>
+
+<div class="card">
+  <div class="barra">
+    <input id="buscar" placeholder="Buscar por código o nombre">
+    <button class="sec" id="exportar">Exportar CSV</button>
+    <label>Importar CSV: <input type="file" id="importar" accept=".csv"></label>
+  </div>
+</div>
+
+<div class="card">
+  <p class="total">Total mostrado: <span id="total">0.00</span> Bs</p>
+  <table>
+    <thead><tr><th>Fecha</th><th>Código</th><th>Producto</th><th class="der">Monto (Bs)</th><th></th></tr></thead>
+    <tbody id="lista"></tbody>
+  </table>
+</div>
+
+<script>
+const KEY = "registro_ventas_v1";
+let ventas = JSON.parse(localStorage.getItem(KEY) || "[]");
+
+const $ = id => document.getElementById(id);
+
+function guardar() {
+  localStorage.setItem(KEY, JSON.stringify(ventas));
+}
+
+function esc(texto) {
+  return String(texto).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function render() {
+  const q = $("buscar").value.trim().toLowerCase();
+  const lista = $("lista");
+  lista.innerHTML = "";
+  let total = 0;
+
+  ventas.forEach((v, i) => {
+    if (q && !(v.codigo + " " + v.nombre).toLowerCase().includes(q)) return;
+    total += Number(v.monto);
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${esc(v.fecha)}</td>
+      <td>${esc(v.codigo)}</td>
+      <td>${esc(v.nombre)}</td>
+      <td class="der">${Number(v.monto).toFixed(2)}</td>
+      <td><button class="del" data-i="${i}">Borrar</button></td>`;
+    lista.appendChild(tr);
+  });
+
+  $("total").textContent = total.toFixed(2);
+}
+
+$("form").addEventListener("submit", e => {
+  e.preventDefault();
+  ventas.push({
+    fecha: $("fecha").value,
+    codigo: $("codigo").value.trim(),
+    nombre: $("nombre").value.trim(),
+    monto: Number($("monto").value)
+  });
+  guardar();
+  $("codigo").value = "";
+  $("nombre").value = "";
+  $("monto").value = "";
+  render();
+});
+
+$("lista").addEventListener("click", e => {
+  if (!e.target.classList.contains("del")) return;
+  if (!confirm("¿Borrar esta venta?")) return;
+  ventas.splice(Number(e.target.dataset.i), 1);
+  guardar();
+  render();
+});
+
+$("buscar").addEventListener("input", render);
+
+function csvCelda(valor) {
+  return '"' + String(valor).replace(/"/g, '""') + '"';
+}
+
+$("exportar").addEventListener("click", () => {
+  const filas = ["fecha,codigo,producto,monto"];
+  ventas.forEach(v => {
+    filas.push([csvCelda(v.fecha), csvCelda(v.codigo), csvCelda(v.nombre), v.monto].join(","));
+  });
+  const blob = new Blob(["\uFEFF" + filas.join("\n")], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "ventas_" + new Date().toISOString().slice(0, 10) + ".csv";
+  a.click();
+});
+
+function parseLinea(linea) {
+  const celdas = [];
+  let actual = "", entreComillas = false;
+  for (let i = 0; i < linea.length; i++) {
+    const c = linea[i];
+    if (entreComillas) {
+      if (c === '"' && linea[i + 1] === '"') { actual += '"'; i++; }
+      else if (c === '"') entreComillas = false;
+      else actual += c;
+    } else if (c === '"') entreComillas = true;
+    else if (c === ",") { celdas.push(actual); actual = ""; }
+    else actual += c;
+  }
+  celdas.push(actual);
+  return celdas;
+}
+
+$("importar").addEventListener("change", async e => {
+  const archivo = e.target.files[0];
+  if (!archivo) return;
+  const texto = await archivo.text();
+  const lineas = texto.replace(/^\uFEFF/, "").split(/\r?\n/).filter(l => l.trim());
+  let agregadas = 0;
+  lineas.slice(1).forEach(l => {
+    const [fecha, codigo, nombre, monto] = parseLinea(l);
+    if (fecha && codigo && nombre && !isNaN(Number(monto))) {
+      ventas.push({ fecha, codigo, nombre, monto: Number(monto) });
+      agregadas++;
+    }
+  });
+  guardar();
+  render();
+  alert(agregadas + " ventas importadas.");
+  e.target.value = "";
+});
+
+render();
+</script>
+</body>
+</html>
